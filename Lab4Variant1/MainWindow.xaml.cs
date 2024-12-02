@@ -73,6 +73,8 @@ namespace Lab4Variant1
             {
                 // Отрисовываем контуры и заполняем треугольник
                 DrawTriangle(bitmap, modeB ? Colors.Red : FillColor);
+                Console.WriteLine("Отрисован треугольник");
+
             }
 
             private void DrawTriangle(WriteableBitmap bitmap, Color color)
@@ -85,38 +87,46 @@ namespace Lab4Variant1
                 // Заполнение треугольника
                 FillTriangle(bitmap, color);
             }
-            
+
 
             private void DrawLine(Point start, Point end, WriteableBitmap bitmap, Color color)
             {
-                int dx = Math.Abs((int)(end.X - start.X));
-                int dy = Math.Abs((int)(end.Y - start.Y));
-                int sx = start.X < end.X ? 1 : -1;
-                int sy = start.Y < end.Y ? 1 : -1;
+                // Округляем координаты до ближайших целых чисел
+                int x0 = (int)Math.Round(start.X);
+                int y0 = (int)Math.Round(start.Y);
+                int x1 = (int)Math.Round(end.X);
+                int y1 = (int)Math.Round(end.Y);
+
+                int dx = Math.Abs(x1 - x0);
+                int dy = Math.Abs(y1 - y0);
+                int sx = x0 < x1 ? 1 : -1;
+                int sy = y0 < y1 ? 1 : -1;
                 int err = dx - dy;
 
-                while (true)
-                {
-                    SetPixel(bitmap, (int)start.X, (int)start.Y, color);
+                int maxSteps = Math.Max(dx, dy) + 1; // Ограничение на количество шагов
 
-                    if (start.X == end.X && start.Y == end.Y)
+                while (maxSteps-- > 0) // Защита от бесконечного цикла
+                {
+                    SetPixel(bitmap, x0, y0, color);
+
+                    if (x0 == x1 && y0 == y1)
                         break;
 
                     int e2 = 2 * err;
                     if (e2 > -dy)
                     {
                         err -= dy;
-                        start.X += sx;
+                        x0 += sx;
                     }
                     if (e2 < dx)
                     {
                         err += dx;
-                        start.Y += sy;
+                        y0 += sy;
                     }
                 }
             }
 
-             private void SetPixel(WriteableBitmap bitmap, int x, int y, Color color)
+            private void SetPixel(WriteableBitmap bitmap, int x, int y, Color color)
             {
                 if (x >= 0 && y >= 0 && x < bitmap.PixelWidth && y < bitmap.PixelHeight)
                 {
@@ -211,29 +221,43 @@ namespace Lab4Variant1
         public class LiangBarsky
         {
             // Функция для отсечения одного отрезка
-            public static bool ClipLine(double x0, double y0, double x1, double y1, double xmin, double ymin, double xmax, double ymax, out double newX0, out double newY0, out double newX1, out double newY1)
+            public static bool ClipLine(double x0, double y0, double x1, double y1,
+                             double xmin, double ymin, double xmax, double ymax,
+                             out double newX0, out double newY0, out double newX1, out double newY1)
             {
-                // Определение коэффициентов для каждой из сторон окна
-                double p0, p1, q0, q1;
-                newX0 = x0;
-                newY0 = y0;
-                newX1 = x1;
-                newY1 = y1;
+                double t0 = 0.0, t1 = 1.0;
+                double dx = x1 - x0, dy = y1 - y0;
 
-                // Логика отсечения для горизонтальных и вертикальных сторон окна
-                p0 = -(x1 - x0);  // dx
-                p1 = x1 - x0;     // dx
-                q0 = x0 - xmin;
-                q1 = xmax - x0;
+                newX0 = x0; newY0 = y0;
+                newX1 = x1; newY1 = y1;
 
-                if (ClipTest(p0, q0, ref newX0, ref newX1) && ClipTest(p1, q1, ref newX0, ref newX1))
+                double[] p = { -dx, dx, -dy, dy };
+                double[] q = { x0 - xmin, xmax - x0, y0 - ymin, ymax - y0 };
+
+                for (int i = 0; i < 4; i++)
                 {
-                    return true; // Успешное отсечение
+                    if (p[i] == 0)
+                    {
+                        if (q[i] < 0) return false; // Полностью вне
+                    }
+                    else
+                    {
+                        double r = q[i] / p[i];
+                        if (p[i] < 0) t0 = Math.Max(t0, r); // Входной интервал
+                        else t1 = Math.Min(t1, r);         // Выходной интервал
+                    }
                 }
 
-                // Если линия не пересекает окно
-                return false;
+                if (t0 > t1) return false; // Линия полностью вне области
+
+                newX0 = x0 + t0 * dx;
+                newY0 = y0 + t0 * dy;
+                newX1 = x0 + t1 * dx;
+                newY1 = y0 + t1 * dy;
+
+                return true;
             }
+
 
             public static bool ClipTest(double p, double q, ref double x0, ref double x1)
             {
@@ -269,45 +293,34 @@ namespace Lab4Variant1
         }
 
         // Класс для кадрирования треугольников с использованием Лианга-Барски
-        public class TriangleClipper
-        {
-            public static void ClipTriangle(ref Point v1, ref Point v2, ref Point v3, Rect clipRect)
-    {
-        // Определяем границы
-        double xmin = clipRect.Left, ymin = clipRect.Top, xmax = clipRect.Right, ymax = clipRect.Bottom;
+        
+            public static bool ClipTriangle(ref Point v1, ref Point v2, ref Point v3, Rect clipRect)
+            {
+                double xmin = clipRect.Left, ymin = clipRect.Top, xmax = clipRect.Right, ymax = clipRect.Bottom;
 
-        // Отсечение каждой стороны треугольника
-        if (!LiangBarsky.ClipLine(v1.X, v1.Y, v2.X, v2.Y, xmin, ymin, xmax, ymax, out double newX0, out double newY0, out double newX1, out double newY1))
-        {
-            v1 = new Point(double.NaN, double.NaN); // Помечаем как "невидимую" сторону
-        }
-        else
-        {
-            v1 = new Point(newX0, newY0);
-            v2 = new Point(newX1, newY1);
-        }
+                // Отсечение каждой стороны треугольника
+                bool side1 = LiangBarsky.ClipLine(v1.X, v1.Y, v2.X, v2.Y, xmin, ymin, xmax, ymax, out double x0, out double y0, out double x1, out double y1);
+                bool side2 = LiangBarsky.ClipLine(v2.X, v2.Y, v3.X, v3.Y, xmin, ymin, xmax, ymax, out double x2, out double y2, out double x3, out double y3);
+                bool side3 = LiangBarsky.ClipLine(v3.X, v3.Y, v1.X, v1.Y, xmin, ymin, xmax, ymax, out double x4, out double y4, out double x5, out double y5);
 
-        if (!LiangBarsky.ClipLine(v2.X, v2.Y, v3.X, v3.Y, xmin, ymin, xmax, ymax, out newX0, out newY0, out newX1, out newY1))
-        {
-            v2 = new Point(double.NaN, double.NaN);
-        }
-        else
-        {
-            v2 = new Point(newX0, newY0);
-            v3 = new Point(newX1, newY1);
-        }
+                // Если все стороны вне области, треугольник невидим
+                if (!side1 && !side2 && !side3)
+                {
+                    v1 = new Point(double.NaN, double.NaN);
+                    v2 = new Point(double.NaN, double.NaN);
+                    v3 = new Point(double.NaN, double.NaN);
+                    return false;
+                }
 
-        if (!LiangBarsky.ClipLine(v3.X, v3.Y, v1.X, v1.Y, xmin, ymin, xmax, ymax, out newX0, out newY0, out newX1, out newY1))
-        {
-            v3 = new Point(double.NaN, double.NaN);
-        }
-        else
-        {
-            v3 = new Point(newX0, newY0);
-            v1 = new Point(newX1, newY1);
-        }
-    }
-        }
+                // Обновляем видимые стороны
+                if (side1) { v1 = new Point(x0, y0); v2 = new Point(x1, y1); }
+                if (side2) { v2 = new Point(x2, y2); v3 = new Point(x3, y3); }
+                if (side3) { v3 = new Point(x4, y4); v1 = new Point(x5, y5); }
+
+                return true;
+            }
+
+        
 
         // Класс LayerContainer (Контейнер слоёв)
         public class LayerContainer
@@ -332,19 +345,23 @@ namespace Lab4Variant1
                         Point v3 = triangle.Vertices[2];
 
                         // Применяем алгоритм Лианга-Барски
-                        TriangleClipper.ClipTriangle(ref v1, ref v2, ref v3, clipRect);
-
-                        // Обновляем вершины треугольника
-                        triangle.Vertices = new[] { v1, v2, v3 };
-
-                        // Лог для проверки
-                        Console.WriteLine($"Обновлённый треугольник в слое {layer.Name}:");
-                        Console.WriteLine($"V1: ({v1.X}, {v1.Y}), V2: ({v2.X}, {v2.Y}), V3: ({v3.X}, {v3.Y})");
+                        if (ClipTriangle(ref v1, ref v2, ref v3, clipRect))
+                        {
+                            // Обновляем вершины
+                            triangle.Vertices = new[] { v1, v2, v3 };
+                            Console.WriteLine($"Обновлённый треугольник в слое {layer.Name}:");
+                            Console.WriteLine($"V1: ({v1.X}, {v1.Y}), V2: ({v2.X}, {v2.Y}), V3: ({v3.X}, {v3.Y})");
+                        }
+                        else
+                        {
+                            // Если треугольник полностью вне области, скрываем слой
+                            layer.IsVisible = false;
+                            Console.WriteLine($"Треугольник в слое {layer.Name} полностью вне области.");
+                        }
                     }
                 }
-                
             }
-           
+
             public void RasterizeAllLayers(WriteableBitmap bitmap, bool modeB)
             {
                 foreach (var layer in Layers)
@@ -379,7 +396,6 @@ namespace Lab4Variant1
             // Применяем новый масштаб
             ApplyTransform(DrawingCanvas);
         }
-
        
         private void SetPixel(WriteableBitmap bitmap, int x, int y, Color color)
         {
@@ -418,9 +434,17 @@ namespace Lab4Variant1
               new Point(200, 50),
               new Point(200, 150),
               Colors.Yellow, Colors.Black);
+
+            var triangle4 = new Triangle(
+             new Point(0, 0),
+             new Point(10, 650),
+             new Point(500, 680),
+             Colors.Violet, Colors.Black);
+
             _layerContainer.AddLayer(new Layer(_layerContainer.Layers.Count, $"Layer {_layerContainer.Layers.Count}", triangle3));
             _layerContainer.AddLayer(new Layer(_layerContainer.Layers.Count, $"Layer {_layerContainer.Layers.Count}", triangle));
             _layerContainer.AddLayer(new Layer(_layerContainer.Layers.Count, $"Layer {_layerContainer.Layers.Count}", triangle2));
+            _layerContainer.AddLayer(new Layer(_layerContainer.Layers.Count, $"Layer {_layerContainer.Layers.Count}", triangle4));
             
 
         }
@@ -551,14 +575,12 @@ namespace Lab4Variant1
         }
         private  void RenderButton_Click(object sender, RoutedEventArgs e)
         {
-            var bitmap = new WriteableBitmap((int)DrawingCanvas.Width, (int)DrawingCanvas.Height, 2, 2, PixelFormats.Pbgra32, null);
+            var bitmap = new WriteableBitmap((int)DrawingCanvas.Width -100, (int)DrawingCanvas.Height - 100, 2, 2, PixelFormats.Pbgra32, null);
             DrawAxesAndFrame(bitmap);
             // Обновляем слои с отсечением
-          
-            //_layerContainer.UpdateLayersWithClipping(bitmap);
-             Console.WriteLine("end");
+
+            _layerContainer.UpdateLayersWithClipping(bitmap);
             _layerContainer.RasterizeAllLayers(bitmap, _modeB);
-             Console.WriteLine("end");
             
            
             DrawGrid(bitmap, gridSize: 2, gridColor: Colors.LightGray);
@@ -567,7 +589,7 @@ namespace Lab4Variant1
         }
         private async void RenderSequentiallyButton_Click(object sender, RoutedEventArgs e)
         {
-            var bitmap = new WriteableBitmap((int)DrawingCanvas.Width, (int)DrawingCanvas.Height, 2, 2, PixelFormats.Pbgra32, null);
+            var bitmap = new WriteableBitmap((int)DrawingCanvas.Width - 100, (int)DrawingCanvas.Height - 100, 2, 2, PixelFormats.Pbgra32, null);
             DrawAxesAndFrame(bitmap);
             // Обновляем слои с отсечением
             _layerContainer.UpdateLayersWithClipping(bitmap);
