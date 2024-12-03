@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Cryptography.X509Certificates;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -16,7 +17,12 @@ namespace Lab4Variant1
     // Класс MainWindow.xaml.cs
     public partial class MainWindow : Window
     {
-        
+        private bool _modeB = false; // Режим работы
+        private void ModeButton_Click(object sender, RoutedEventArgs e)
+        {
+            _modeB = !_modeB;
+        }
+
         // Класс Layer (Слой)
         public class Layer
         {
@@ -39,7 +45,8 @@ namespace Lab4Variant1
             IShape Clip(Rect clipRect);
             IShape DetermineVisiblePart(List<IShape> blockingShapes);
             void Rasterize(WriteableBitmap bitmap, bool modeB);
-            // Добавление метода для получения ограничивающего прямоугольника
+            List<IShape> GetVisibleFragments(); // Получение фрагментов для видимости
+        
         }
 
         // Класс Triangle (Треугольник)
@@ -48,6 +55,7 @@ namespace Lab4Variant1
             public Point[] Vertices { get; set; }
             public Color FillColor { get; set; }
             public Color BorderColor { get; set; }
+            public List<IShape> VisibleFragments { get; private set; } = new List<IShape>();
 
             public Triangle(Point v1, Point v2, Point v3, Color fillColor, Color borderColor)
             {
@@ -64,28 +72,83 @@ namespace Lab4Variant1
 
             public IShape DetermineVisiblePart(List<IShape> blockingShapes)
             {
-                IShape visiblePart = this;
-               
-                return visiblePart;
+                // Начинаем с полной фигуры
+                var remainingVisible = new List<IShape> { this };
+
+                // Проходим по каждой блокирующей фигуре
+                foreach (var blockingShape in blockingShapes)
+                {
+                    var updatedVisible = new List<IShape>();
+                    foreach (var fragment in remainingVisible)
+                    {
+                        if (blockingShape is Triangle blockingTriangle)
+                        {
+                            // Отсечь блокирующим треугольником
+                            updatedVisible.AddRange(ClipTriangleWithBlocking(fragment as Triangle, blockingTriangle));
+                        }
+                    }
+                    remainingVisible = updatedVisible;
+                }
+
+                VisibleFragments = remainingVisible;
+                return this;
+            }
+            public List<IShape> GetVisibleFragments()
+            {
+                return VisibleFragments;
+            }
+
+            private List<IShape> ClipTriangleWithBlocking(Triangle target, Triangle blocking)
+            {
+                // Реализация логики отсечения треугольника другим треугольником
+                // Вернуть список оставшихся фрагментов
+                return new List<IShape> { target }; // Псевдокод
             }
 
             public void Rasterize(WriteableBitmap bitmap, bool modeB)
             {
-                // Отрисовываем контуры и заполняем треугольник
-                DrawTriangle(bitmap, modeB ? Colors.Red : FillColor);
-                Console.WriteLine("Отрисован треугольник");
-
+                foreach (var fragment in VisibleFragments)
+                {
+                 (fragment as Triangle)?.DrawTriangle(bitmap, FillColor , modeB); 
+                }
             }
 
-            private void DrawTriangle(WriteableBitmap bitmap, Color color)
+
+            private void DrawTriangle(WriteableBitmap bitmap, Color color,bool modeB)
             {
-                // Отрисовываем стороны треугольника
-                DrawLine(Vertices[0], Vertices[1], bitmap, color);
-                Console.WriteLine(Vertices[0].ToString());
-                DrawLine(Vertices[1], Vertices[2], bitmap, color);
-                DrawLine(Vertices[2], Vertices[0], bitmap, color);
-                // Заполнение треугольника
-                FillTriangle(bitmap, color);
+                if (modeB)
+                {
+                    var (success, newCoordinates) = LiangBarsky.ClipLine(
+                        Vertices[0].X, Vertices[0].Y, Vertices[1].X, Vertices[1].Y,
+                        xmin: 0, ymin: 0, xmax: bitmap.Width - 1, ymax: bitmap.Height - 1
+                        );
+                    Console.WriteLine(new Point(newCoordinates.newX0, newCoordinates.newY0).ToString());
+                    Console.WriteLine(new Point(newCoordinates.newX1, newCoordinates.newY1).ToString());
+
+                    DrawLine(new Point(newCoordinates.newX0, newCoordinates.newY0), new Point(newCoordinates.newX1, newCoordinates.newY1), bitmap, color);
+
+
+                    (success, newCoordinates) = LiangBarsky.ClipLine(
+                        Vertices[1].X, Vertices[1].Y, Vertices[2].X, Vertices[2].Y,
+                        xmin: 0, ymin: 0, xmax: bitmap.Width - 1, ymax: bitmap.Height - 1
+                        );
+                    DrawLine(new Point(newCoordinates.newX0, newCoordinates.newY0), new Point(newCoordinates.newX1, newCoordinates.newY1), bitmap, color);
+
+
+                    (success, newCoordinates) = LiangBarsky.ClipLine(
+                        Vertices[2].X, Vertices[2].Y, Vertices[0].X, Vertices[0].Y,
+                        xmin: 0, ymin: 0, xmax: bitmap.Width - 1, ymax: bitmap.Height - 1
+                        );
+                    DrawLine(new Point(newCoordinates.newX0, newCoordinates.newY0), new Point(newCoordinates.newX1, newCoordinates.newY1), bitmap, color);
+                    FillTriangle(bitmap, color);
+                }
+                else
+                {
+                    DrawLine(Vertices[0], Vertices[1],bitmap, Colors.Red);
+                    DrawLine(Vertices[1], Vertices[2],bitmap, Colors.Red);
+                    DrawLine(Vertices[2], Vertices[0],bitmap, Colors.Red);
+                }
+               
             }
 
 
@@ -221,15 +284,12 @@ namespace Lab4Variant1
         public class LiangBarsky
         {
             // Функция для отсечения одного отрезка
-            public static bool ClipLine(double x0, double y0, double x1, double y1,
-                             double xmin, double ymin, double xmax, double ymax,
-                             out double newX0, out double newY0, out double newX1, out double newY1)
+            public static (bool success, (double newX0, double newY0, double newX1, double newY1)) ClipLine(
+                double x0, double y0, double x1, double y1,
+                double xmin, double ymin, double xmax, double ymax)
             {
                 double t0 = 0.0, t1 = 1.0;
                 double dx = x1 - x0, dy = y1 - y0;
-
-                newX0 = x0; newY0 = y0;
-                newX1 = x1; newY1 = y1;
 
                 double[] p = { -dx, dx, -dy, dy };
                 double[] q = { x0 - xmin, xmax - x0, y0 - ymin, ymax - y0 };
@@ -238,126 +298,55 @@ namespace Lab4Variant1
                 {
                     if (p[i] == 0)
                     {
-                        if (q[i] < 0) return false; // Полностью вне
+                        if (q[i] < 0)
+                        {
+                            return (false, (x0, y0, x1, y1)); // Линия полностью вне области
+                        }
                     }
                     else
                     {
                         double r = q[i] / p[i];
-                        if (p[i] < 0) t0 = Math.Max(t0, r); // Входной интервал
-                        else t1 = Math.Min(t1, r);         // Выходной интервал
+                        if (p[i] < 0)
+                        {
+                            t0 = Math.Max(t0, r); // Входной интервал
+                        }
+                        else
+                        {
+                            t1 = Math.Min(t1, r); // Выходной интервал
+                        }
                     }
                 }
 
-                if (t0 > t1) return false; // Линия полностью вне области
-
-                newX0 = x0 + t0 * dx;
-                newY0 = y0 + t0 * dy;
-                newX1 = x0 + t1 * dx;
-                newY1 = y0 + t1 * dy;
-
-                return true;
-            }
-
-
-            public static bool ClipTest(double p, double q, ref double x0, ref double x1)
-            {
-                if (p == 0)
+                if (t0 > t1)
                 {
-                    return (q >= 0); // если отрезок параллелен стороне и выходит за пределы окна
+                    return (false, (x0, y0, x1, y1)); // Линия полностью вне области
                 }
-                double r = q / p;
-                if (p < 0)
-                {
-                    if (r > x1)
-                    {
-                        return false;
-                    }
-                    if (r > x0)
-                    {
-                        x0 = r;
-                    }
-                }
-                else
-                {
-                    if (r < x0)
-                    {
-                        return false;
-                    }
-                    if (r < x1)
-                    {
-                        x1 = r;
-                    }
-                }
-                return true;
+
+                // Рассчитываем новые координаты
+                double newX0 = x0 + t0 * dx;
+                double newY0 = y0 + t0 * dy;
+                double newX1 = x0 + t1 * dx;
+                double newY1 = y0 + t1 * dy;
+
+                return (true, (newX0, newY0, newX1, newY1));
             }
         }
 
-        // Класс для кадрирования треугольников с использованием Лианга-Барски
-        
-            public static bool ClipTriangle(ref Point v1, ref Point v2, ref Point v3, Rect clipRect)
-            {
-                double xmin = clipRect.Left, ymin = clipRect.Top, xmax = clipRect.Right, ymax = clipRect.Bottom;
-
-                // Отсечение каждой стороны треугольника
-                bool side1 = LiangBarsky.ClipLine(v1.X, v1.Y, v2.X, v2.Y, xmin, ymin, xmax, ymax, out double x0, out double y0, out double x1, out double y1);
-                bool side2 = LiangBarsky.ClipLine(v2.X, v2.Y, v3.X, v3.Y, xmin, ymin, xmax, ymax, out double x2, out double y2, out double x3, out double y3);
-                bool side3 = LiangBarsky.ClipLine(v3.X, v3.Y, v1.X, v1.Y, xmin, ymin, xmax, ymax, out double x4, out double y4, out double x5, out double y5);
-
-                // Если все стороны вне области, треугольник невидим
-                if (!side1 && !side2 && !side3)
-                {
-                    v1 = new Point(double.NaN, double.NaN);
-                    v2 = new Point(double.NaN, double.NaN);
-                    v3 = new Point(double.NaN, double.NaN);
-                    return false;
-                }
-
-                // Обновляем видимые стороны
-                if (side1) { v1 = new Point(x0, y0); v2 = new Point(x1, y1); }
-                if (side2) { v2 = new Point(x2, y2); v3 = new Point(x3, y3); }
-                if (side3) { v3 = new Point(x4, y4); v1 = new Point(x5, y5); }
-
-                return true;
-            }
-
-        
 
         // Класс LayerContainer (Контейнер слоёв)
         public class LayerContainer
         {
-            public List<Layer> Layers { get; private set; } = new List<Layer>();
-
-            public void AddLayer(Layer layer)
+            public void UpdateLayersWithVisibility(WriteableBitmap bitmap, bool modeB)
             {
-                Layers.Add(layer);
-            }
-            public void UpdateLayersWithClipping(WriteableBitmap bitmap)
-            {
-                Rect clipRect = new Rect(0, 0, bitmap.PixelWidth - 1, bitmap.PixelHeight - 1);
+                Rect clipRect = new Rect(30, 30, bitmap.PixelWidth - 400, bitmap.PixelHeight - 400);
 
                 foreach (var layer in Layers)
                 {
-                    if (layer.IsVisible && layer.Shape is Triangle triangle)
+                    if (layer.IsVisible)
                     {
-                        // Получаем вершины треугольника
-                        Point v1 = triangle.Vertices[0];
-                        Point v2 = triangle.Vertices[1];
-                        Point v3 = triangle.Vertices[2];
-
-                        // Применяем алгоритм Лианга-Барски
-                        if (ClipTriangle(ref v1, ref v2, ref v3, clipRect))
-                        {
-                            // Обновляем вершины
-                            triangle.Vertices = new[] { v1, v2, v3 };
-                            Console.WriteLine($"Обновлённый треугольник в слое {layer.Name}:");
-                            Console.WriteLine($"V1: ({v1.X}, {v1.Y}), V2: ({v2.X}, {v2.Y}), V3: ({v3.X}, {v3.Y})");
-                        }
-                        else
-                        {
-                            // Если треугольник полностью вне области, скрываем слой
-                            layer.IsVisible = false;
-                            Console.WriteLine($"Треугольник в слое {layer.Name} полностью вне области.");
-                        }
+                        var blockingShapes = GetBlockingShapes(layer.Id);
+                        layer.Shape.Clip(clipRect); // Отсечение по кадру
+                        layer.Shape.DetermineVisiblePart(blockingShapes); // Определение видимых частей
                     }
                 }
             }
@@ -366,16 +355,51 @@ namespace Lab4Variant1
             {
                 foreach (var layer in Layers)
                 {
-                    layer.Shape.Rasterize(bitmap,modeB);
+                    if (layer.IsVisible)
+                    {
+                        layer.Shape.Rasterize(bitmap, modeB);
+                    }
                 }
             }
+
+            public List<Layer> Layers { get; private set; } = new List<Layer>();
+            
+            public void AddLayer(Layer layer)
+            {
+                Layers.Add(layer);
+            }
+            //public void Shift(Layer layer)
+            //{
+            //    foreach (var lyer in Layers)
+            //    {
+            //        if (lyer.Shape is Triangle triangle)
+            //        {
+            //            lyer.Shape.ShiftX();
+            //            lyer.Shape.ShiftY();
+            //        }
+            //    }
+            //}
+            public async void UpdateLayersWithClipping(WriteableBitmap bitmap, bool _modeB)
+            {
+                Rect clipRect = new Rect(0, 0, bitmap.PixelWidth - 1, bitmap.PixelHeight - 1);
+
+                foreach (var layer in Layers)
+                {
+                    if (layer.IsVisible && layer.Shape is Triangle triangle)
+                    {
+                        layer.Shape.Rasterize(bitmap, _modeB);
+                        await Task.Delay(1000);
+                    }
+                }
+            }
+
+            
             public List<IShape> GetBlockingShapes(int layerId)
             {
                 return Layers.Where(l => l.Id < layerId && l.IsVisible).Select(l => l.Shape).ToList();
             }
         }
         private LayerContainer _layerContainer;
-        private bool _modeB = false; // Режим отображения
         private double _scale = 1.0;
         private Point _shift = new Point(0, 0);
 
@@ -427,25 +451,33 @@ namespace Lab4Variant1
                 new Point(100, 50),
                 new Point(150, 50),
                 new Point(200, 150),
-                Colors.Red, Colors.Black);
+                Colors.Red, Colors.Black
+                );
 
             var triangle3 = new Triangle(
-              new Point(-50, 50),
-              new Point(200, 50),
-              new Point(200, 150),
+              new Point(-300, 50),
+              new Point(100, 250),
+              new Point(300, 150),
               Colors.Yellow, Colors.Black);
 
             var triangle4 = new Triangle(
-             new Point(0, 0),
-             new Point(10, 650),
-             new Point(500, 680),
+             new Point(-40, 20),
+             new Point(-40, 400),
+             new Point(800, 300),
              Colors.Violet, Colors.Black);
 
-            _layerContainer.AddLayer(new Layer(_layerContainer.Layers.Count, $"Layer {_layerContainer.Layers.Count}", triangle3));
+            var triangle5 = new Triangle(
+            new Point(200, 200),
+            new Point(100, 500),
+            new Point(800, 800),
+            Colors.Pink, Colors.Black);
+
             _layerContainer.AddLayer(new Layer(_layerContainer.Layers.Count, $"Layer {_layerContainer.Layers.Count}", triangle));
             _layerContainer.AddLayer(new Layer(_layerContainer.Layers.Count, $"Layer {_layerContainer.Layers.Count}", triangle2));
+            _layerContainer.AddLayer(new Layer(_layerContainer.Layers.Count, $"Layer {_layerContainer.Layers.Count}", triangle3));
             _layerContainer.AddLayer(new Layer(_layerContainer.Layers.Count, $"Layer {_layerContainer.Layers.Count}", triangle4));
-            
+            _layerContainer.AddLayer(new Layer(_layerContainer.Layers.Count, $"Layer {_layerContainer.Layers.Count}", triangle5));
+
 
         }
         private void DrawLine(WriteableBitmap bitmap, int x1, int y1, int x2, int y2, Color color)
@@ -514,14 +546,8 @@ namespace Lab4Variant1
         {
             // Рисуем рамку (границу) изображения
             DrawRectangle(bitmap, 0, 0, bitmap.PixelWidth - 1, bitmap.PixelHeight - 1, Colors.Black);
-
-            }
-       
-
-        private void ModeButton_Click(object sender, RoutedEventArgs e)
-        {
-            _modeB = !_modeB;
         }
+       
 
         private void ScaleUpButton_Click(object sender, RoutedEventArgs e)
         {
@@ -569,41 +595,59 @@ namespace Lab4Variant1
                 Children = new TransformCollection
             {
                 new ScaleTransform(_scale, _scale),
-                new TranslateTransform(_shift.X, _shift.Y)
+                
             }
             };
         }
+        private void ClearBitmap(WriteableBitmap bitmap, Color clearColor)
+        {
+            bitmap.Lock();
+            unsafe
+            {
+                int pixel = clearColor.A << 24 | clearColor.R << 16 | clearColor.G << 8 | clearColor.B;
+                int* pBackBuffer = (int*)bitmap.BackBuffer;
+
+                for (int i = 0; i < bitmap.PixelWidth * bitmap.PixelHeight; i++)
+                    pBackBuffer[i] = pixel;
+            }
+            bitmap.AddDirtyRect(new Int32Rect(0, 0, bitmap.PixelWidth, bitmap.PixelHeight));
+            bitmap.Unlock();
+        }
         private  void RenderButton_Click(object sender, RoutedEventArgs e)
         {
-            var bitmap = new WriteableBitmap((int)DrawingCanvas.Width -100, (int)DrawingCanvas.Height - 100, 2, 2, PixelFormats.Pbgra32, null);
-            DrawAxesAndFrame(bitmap);
+            var _virtualBitmap = new WriteableBitmap((int)DrawingCanvas.Width , (int)DrawingCanvas.Height , 2, 2, PixelFormats.Pbgra32, null);
+            ClearBitmap(_virtualBitmap, Colors.White);
+
             // Обновляем слои с отсечением
-
-            _layerContainer.UpdateLayersWithClipping(bitmap);
-            _layerContainer.RasterizeAllLayers(bitmap, _modeB);
-            
-           
-            DrawGrid(bitmap, gridSize: 2, gridColor: Colors.LightGray);
-
-            DrawingCanvas.Background = new ImageBrush(bitmap);
+            _layerContainer.UpdateLayersWithVisibility(_virtualBitmap, _modeB);
+            _layerContainer.RasterizeAllLayers(_virtualBitmap, _modeB);
+            DrawAxesAndFrame(_virtualBitmap);
+            DrawGrid(_virtualBitmap, gridSize: 2, gridColor: Colors.LightGray);
+            DrawingCanvas.Background = new ImageBrush(_virtualBitmap);
         }
         private async void RenderSequentiallyButton_Click(object sender, RoutedEventArgs e)
         {
-            var bitmap = new WriteableBitmap((int)DrawingCanvas.Width - 100, (int)DrawingCanvas.Height - 100, 2, 2, PixelFormats.Pbgra32, null);
+            var bitmap = new WriteableBitmap((int)DrawingCanvas.Width , (int)DrawingCanvas.Height , 2, 2, PixelFormats.Pbgra32, null);
             DrawAxesAndFrame(bitmap);
             // Обновляем слои с отсечением
-            _layerContainer.UpdateLayersWithClipping(bitmap);
+            _layerContainer.UpdateLayersWithClipping(bitmap, _modeB);
             foreach (var layer in _layerContainer.Layers)
             {
                 if (layer.IsVisible && layer.Shape is Triangle triangle)
                 {
                     var visiblePart = layer.Shape.DetermineVisiblePart(_layerContainer.GetBlockingShapes(layer.Id));
-                    visiblePart.Rasterize(bitmap, _modeB);
+                    visiblePart.Rasterize(bitmap,_modeB);
                     DrawingCanvas.Background = new ImageBrush(bitmap);
                     await Task.Delay(1000);
                 }
             }
             DrawGrid(bitmap, gridSize: 2, gridColor: Colors.LightGray);
+
+        }
+
+        private void ShowGridButton_Click(object sender, RoutedEventArgs e)
+        {
+           
 
         }
     }
