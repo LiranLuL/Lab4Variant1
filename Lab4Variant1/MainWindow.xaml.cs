@@ -72,6 +72,7 @@ namespace Lab4Variant1
 
             public IShape DetermineVisiblePart(List<IShape> blockingShapes)
             {
+
                 // Начинаем с полной фигуры
                 var remainingVisible = new List<IShape> { this };
 
@@ -94,6 +95,45 @@ namespace Lab4Variant1
                 return this;
             }
 
+            private List<IShape> ClipTriangleWithBlocking(Triangle target, Triangle blocking)
+            {
+                var visibleFragments = new List<IShape>();
+
+                // Получаем все ребра треугольника
+                var targetEdges = GetEdges(target.Vertices);
+                var blockingEdges = GetEdges(blocking.Vertices);
+                
+
+                // Список видимых точек
+                var visiblePoints = new List<Point>(target.Vertices);
+
+                // Проверяем пересечение каждого ребра
+                foreach (var edge in targetEdges)
+                {
+                    foreach (var blockEdge in blockingEdges)
+                    {
+                        if (FindIntersection(edge, blockEdge, out var intersection))
+                        {
+                            if (!visiblePoints.Contains(intersection))
+                                visiblePoints.Add(intersection);
+                        }
+                    }
+                }
+
+                // Фильтруем точки внутри блокирующего треугольника
+                visiblePoints = visiblePoints.Where(p => !IsPointInsideTriangle(p, blocking.Vertices)).ToList();
+
+                // Если есть хотя бы три точки, создаем фрагмент
+                if (visiblePoints.Count >= 3)
+                {
+                    for (int i = 1; i < visiblePoints.Count - 1; i++)
+                    {
+                        var triangle = new Triangle(visiblePoints[0], visiblePoints[i], visiblePoints[i + 1], target.FillColor, target.BorderColor);
+                        visibleFragments.Add(triangle);
+                    }
+                }
+                return visibleFragments;
+            }
             public List<IShape> GetVisibleFragments()
             {
                 return VisibleFragments;
@@ -139,7 +179,17 @@ namespace Lab4Variant1
                 double area2 = Area(triangle[0], p, triangle[2]);
                 double area3 = Area(triangle[0], triangle[1], p);
 
-                return Math.Abs(areaOrig - (area1 + area2 + area3)) < 0.01; // С допуском на ошибки
+                // Погрешность для сравнения площади
+                double tolerance = 0.01;
+
+                // Если точка лежит на одной из сторон треугольника (т.е. площадь близка к нулю)
+                if (Math.Abs(area1) < tolerance || Math.Abs(area2) < tolerance || Math.Abs(area3) < tolerance)
+                {
+                    return false; // Точка на границе треугольника
+                }
+
+                // Если сумма площадей равна основной площади с допустимой погрешностью
+                return Math.Abs(areaOrig - (area1 + area2 + area3)) < tolerance;
             }
 
             private double Area(Point p1, Point p2, Point p3)
@@ -147,48 +197,14 @@ namespace Lab4Variant1
                 return Math.Abs((p1.X * (p2.Y - p3.Y) + p2.X * (p3.Y - p1.Y) + p3.X * (p1.Y - p2.Y)) / 2.0);
             }
 
-            private List<IShape> ClipTriangleWithBlocking(Triangle target, Triangle blocking)
-            {
-                var visibleFragments = new List<IShape>();
 
-                // Получаем все ребра треугольника
-                var targetEdges = GetEdges(target.Vertices);
-                var blockingEdges = GetEdges(blocking.Vertices);
-
-                // Список видимых точек
-                var visiblePoints = new List<Point>(target.Vertices);
-
-                // Проверяем пересечение каждого ребра
-                foreach (var edge in targetEdges)
-                {
-                    foreach (var blockEdge in blockingEdges)
-                    {
-                        if (FindIntersection(edge, blockEdge, out var intersection))
-                        {
-                            if (!visiblePoints.Contains(intersection))
-                                visiblePoints.Add(intersection);
-                        }
-                    }
-                }
-
-                // Фильтруем точки внутри блокирующего треугольника
-                visiblePoints = visiblePoints.Where(p => !IsPointInsideTriangle(p, blocking.Vertices)).ToList();
-
-                // Если есть хотя бы три точки, создаем фрагмент
-                if (visiblePoints.Count >= 3)
-                {
-                    for (int i = 1; i < visiblePoints.Count - 1; i++)
-                    {
-                        var triangle = new Triangle(visiblePoints[0], visiblePoints[i], visiblePoints[i + 1], target.FillColor, target.BorderColor);
-                        visibleFragments.Add(triangle);
-                    }
-                }
-
-                return visibleFragments;
-            }
 
             public void Rasterize(WriteableBitmap bitmap, bool modeB,Rect clipRect)
             {
+                //if (VisibleFragments.Count() > 1)
+                //{
+                //    VisibleFragments.RemoveAt(0);
+                //}
                 foreach (var fragment in VisibleFragments)
                 {
                     (fragment as Triangle)?.DrawTriangle(bitmap, FillColor, modeB, clipRect);
@@ -204,10 +220,8 @@ namespace Lab4Variant1
                         Vertices[0].X, Vertices[0].Y, Vertices[1].X, Vertices[1].Y,
                         xmin: 0, ymin: 0, xmax: 300, ymax: 300
                         );
-                    Console.WriteLine(clipRect.ToString());
 
-                    Console.WriteLine(new Point(newCoordinates.newX0, newCoordinates.newY0).ToString());
-                    Console.WriteLine(new Point(newCoordinates.newX1, newCoordinates.newY1).ToString());
+                    
                     if (success)
                     {
                         DrawLine(new Point(newCoordinates.newX0, newCoordinates.newY0), new Point(newCoordinates.newX1, newCoordinates.newY1), bitmap, color);
@@ -455,7 +469,7 @@ namespace Lab4Variant1
                     if (layer.IsVisible)
                     {
                         var blockingShapes = GetBlockingShapes(layer.Id);
-                        layer.Shape.Clip(clipRect); // Отсечение по кадру
+                        //layer.Shape.Clip(clipRect); // Отсечение по кадру
                         layer.Shape.DetermineVisiblePart(blockingShapes); // Определение видимых частей
                     }
                 }
@@ -478,6 +492,11 @@ namespace Lab4Variant1
             {
                 Layers.Add(layer);
                 
+            }
+            public void ClearLayers()
+            {
+                Layers.Clear();
+
             }
             //public void Shift(Layer layer)
             //{
@@ -554,20 +573,29 @@ namespace Lab4Variant1
         private void AddLayerButton_Click(object sender, RoutedEventArgs e)
         {
             var triangle = new Triangle(
-                new Point(90, 50),
-                new Point(100, 440),
-                new Point(400, 150),
+                new Point(100, 5),
+                new Point(50, 200),
+                new Point(150, 200),
                 Colors.Blue, Colors.Black);
 
             var triangle2 = new Triangle(
-               new Point(90, 50),
-               new Point(90, 340),
-               new Point(300, 100),
+                new Point(150, 5),
+                new Point(100, 200),
+                new Point(200, 200),
                Colors.Red, Colors.Black);
 
+            var triangle3 = new Triangle(
+                new Point(0, 50),
+                new Point(150, 300),
+                new Point(400, 300),
+                Colors.Yellow, Colors.Black);
 
-            _layerContainer.AddLayer(new Layer(_layerContainer.Layers.Count, $"Layer {_layerContainer.Layers.Count}", triangle2));
+            
+
             _layerContainer.AddLayer(new Layer(_layerContainer.Layers.Count, $"Layer {_layerContainer.Layers.Count}", triangle));
+            _layerContainer.AddLayer(new Layer(_layerContainer.Layers.Count, $"Layer {_layerContainer.Layers.Count}", triangle2));
+            _layerContainer.AddLayer(new Layer(_layerContainer.Layers.Count, $"Layer {_layerContainer.Layers.Count}", triangle3));
+           
         }
 
         private void AddLayerButton2_Click(object sender, RoutedEventArgs e)
@@ -597,17 +625,12 @@ namespace Lab4Variant1
              new Point(100, 300),
              Colors.Violet, Colors.Black);
 
-            var triangle5 = new Triangle(
-            new Point(200, 200),
-            new Point(100, 300),
-            new Point(400, 400),
-            Colors.Pink, Colors.Black);
+           
 
             _layerContainer.AddLayer(new Layer(_layerContainer.Layers.Count, $"Layer {_layerContainer.Layers.Count}", triangle));
             _layerContainer.AddLayer(new Layer(_layerContainer.Layers.Count, $"Layer {_layerContainer.Layers.Count}", triangle2));
             _layerContainer.AddLayer(new Layer(_layerContainer.Layers.Count, $"Layer {_layerContainer.Layers.Count}", triangle3));
             _layerContainer.AddLayer(new Layer(_layerContainer.Layers.Count, $"Layer {_layerContainer.Layers.Count}", triangle4));
-            _layerContainer.AddLayer(new Layer(_layerContainer.Layers.Count, $"Layer {_layerContainer.Layers.Count}", triangle5));
         }
 
         private void DrawLine(WriteableBitmap bitmap, int x1, int y1, int x2, int y2, Color color)
@@ -696,25 +719,25 @@ namespace Lab4Variant1
 
         private void ShiftLeftButton_Click(object sender, RoutedEventArgs e)
         {
-            _shift.X -= 10;
+            _shift.X -= 50;
             ApplyTransform(DrawingCanvas);
         }
 
         private void ShiftRightButton_Click(object sender, RoutedEventArgs e)
         {
-            _shift.X += 10;
+            _shift.X += 50;
             ApplyTransform(DrawingCanvas);
         }
 
         private void ShiftUpButton_Click(object sender, RoutedEventArgs e)
         {
-            _shift.Y -= 10;
+            _shift.Y -= 50;
             ApplyTransform(DrawingCanvas);
         }
 
         private void ShiftDownButton_Click(object sender, RoutedEventArgs e)
         {
-            _shift.Y += 10;
+            _shift.Y += 50;
             ApplyTransform(DrawingCanvas);
         }
 
@@ -725,7 +748,7 @@ namespace Lab4Variant1
                 Children = new TransformCollection
             {
                 new ScaleTransform(_scale, _scale),
-
+                new TranslateTransform(_shift.X, _shift.Y),
             }
             };
         }
@@ -752,7 +775,7 @@ namespace Lab4Variant1
             _layerContainer.UpdateLayersWithVisibility(_virtualBitmap, _modeB);
             _layerContainer.RasterizeAllLayers(_virtualBitmap, _modeB, clipRect);
             DrawAxesAndFrame(_virtualBitmap);
-            DrawGrid(_virtualBitmap, gridSize: 2, gridColor: Colors.LightGray);
+            //DrawGrid(_virtualBitmap, gridSize: 2, gridColor: Colors.LightGray);
             DrawingCanvas.Background = new ImageBrush(_virtualBitmap);
         }
         private async void RenderSequentiallyButton_Click(object sender, RoutedEventArgs e)
@@ -771,7 +794,7 @@ namespace Lab4Variant1
                     await Task.Delay(1000);
                 }
             }
-            DrawGrid(bitmap, gridSize: 2, gridColor: Colors.LightGray);
+            //DrawGrid(bitmap, gridSize: 2, gridColor: Colors.LightGray);
 
         }
         public Rect clipRect = new Rect(0, 0, 600, 600);
@@ -832,6 +855,11 @@ namespace Lab4Variant1
             _layerContainer.AddLayer(new Layer(_layerContainer.Layers.Count, $"Layer {_layerContainer.Layers.Count}", triangle3));
             _layerContainer.AddLayer(new Layer(_layerContainer.Layers.Count, $"Layer {_layerContainer.Layers.Count}", triangle4));
             _layerContainer.AddLayer(new Layer(_layerContainer.Layers.Count, $"Layer {_layerContainer.Layers.Count}", triangle5));
+        }
+
+        private void ClearButton_Click(object sender, RoutedEventArgs e)
+        {
+            _layerContainer.ClearLayers();
         }
     }
 
