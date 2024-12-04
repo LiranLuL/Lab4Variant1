@@ -4,7 +4,7 @@
         Title="Layered Graphics" Height="900" Width="900">
     <Grid>
         <!-- Холст для рисования -->
-        <Canvas Name="DrawingCanvas" Background="Aqua" Width="600" Height="600"  Margin="10" />
+        <Canvas Name="DrawingCanvas" Background="Aqua" Width="800" Height="700"  Margin="10" />
         <TextBlock Name="ScaleValueText" HorizontalAlignment="Left" VerticalAlignment="Bottom" 
                    Margin="220,10,0,0" FontSize="16" Text="Масштаб: 100%" />
         <Slider Name="ScaleSlider" Minimum="0.1" Maximum="5.0" Value="1.0" Width="200" Height="30" 
@@ -23,6 +23,9 @@
             <Button Name="ShiftRightButton" Content="Shift Right" Click="ShiftRightButton_Click" Margin="5" />
             <Button Name="ShiftUpButton" Content="Shift Up" Click="ShiftUpButton_Click" Margin="5" />
             <Button Name="ShiftDownButton" Content="Shift Down" Click="ShiftDownButton_Click" Margin="5" />
+            <Button Name="DrawOnlyNeeded" Content="DrawOnlyNeeded" Click="DrawOnlyNeededButton_Click" Margin="5" />
+            <Button Name="AddLayerButton2" Content="AddLayerButton2" Click="AddLayerButtonButton2_Click" Margin="5" />
+
         </StackPanel>
     </Grid>
 </Window>

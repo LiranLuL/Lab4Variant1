@@ -12,7 +12,7 @@ using System.Windows.Shapes;
 
 namespace Lab4Variant1
 {
-    
+
 
     // Класс MainWindow.xaml.cs
     public partial class MainWindow : Window
@@ -30,7 +30,7 @@ namespace Lab4Variant1
             public string Name { get; set; }
             public IShape Shape { get; set; }
             public bool IsVisible { get; set; } = true;
-           
+
             public Layer(int id, string name, IShape shape)
             {
                 Id = id;
@@ -44,9 +44,9 @@ namespace Lab4Variant1
         {
             IShape Clip(Rect clipRect);
             IShape DetermineVisiblePart(List<IShape> blockingShapes);
-            void Rasterize(WriteableBitmap bitmap, bool modeB);
+            void Rasterize(WriteableBitmap bitmap, bool modeB, Rect clipRect);
             List<IShape> GetVisibleFragments(); // Получение фрагментов для видимости
-        
+
         }
 
         // Класс Triangle (Треугольник)
@@ -93,101 +93,223 @@ namespace Lab4Variant1
                 VisibleFragments = remainingVisible;
                 return this;
             }
+
             public List<IShape> GetVisibleFragments()
             {
                 return VisibleFragments;
             }
 
-            private List<IShape> ClipTriangleWithBlocking(Triangle target, Triangle blocking)
+            private List<(Point Start, Point End)> GetEdges(Point[] vertices)
             {
-                // Реализация логики отсечения треугольника другим треугольником
-                // Вернуть список оставшихся фрагментов
-                return new List<IShape> { target }; // Псевдокод
+                var edges = new List<(Point Start, Point End)>();
+                for (int i = 0; i < vertices.Length; i++)
+                {
+                    edges.Add((vertices[i], vertices[(i + 1) % vertices.Length]));
+                }
+                return edges;
+            }
+            private bool FindIntersection((Point Start, Point End) edge1, (Point Start, Point End) edge2, out Point intersection)
+            {
+                intersection = new Point();
+
+                double x1 = edge1.Start.X, y1 = edge1.Start.Y;
+                double x2 = edge1.End.X, y2 = edge1.End.Y;
+                double x3 = edge2.Start.X, y3 = edge2.Start.Y;
+                double x4 = edge2.End.X, y4 = edge2.End.Y;
+
+                double denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+
+                if (denom == 0) return false; // Параллельные линии
+
+                double t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom;
+                double u = ((x1 - x3) * (y1 - y2) - (y1 - y3) * (x1 - x2)) / denom;
+
+                if (t >= 0 && t <= 1 && u >= 0 && u <= 1)
+                {
+                    intersection = new Point(x1 + t * (x2 - x1), y1 + t * (y2 - y1));
+                    return true;
+                }
+
+                return false;
+            }
+            private bool IsPointInsideTriangle(Point p, Point[] triangle)
+            {
+                double areaOrig = Area(triangle[0], triangle[1], triangle[2]);
+                double area1 = Area(p, triangle[1], triangle[2]);
+                double area2 = Area(triangle[0], p, triangle[2]);
+                double area3 = Area(triangle[0], triangle[1], p);
+
+                return Math.Abs(areaOrig - (area1 + area2 + area3)) < 0.01; // С допуском на ошибки
             }
 
-            public void Rasterize(WriteableBitmap bitmap, bool modeB)
+            private double Area(Point p1, Point p2, Point p3)
+            {
+                return Math.Abs((p1.X * (p2.Y - p3.Y) + p2.X * (p3.Y - p1.Y) + p3.X * (p1.Y - p2.Y)) / 2.0);
+            }
+
+            private List<IShape> ClipTriangleWithBlocking(Triangle target, Triangle blocking)
+            {
+                var visibleFragments = new List<IShape>();
+
+                // Получаем все ребра треугольника
+                var targetEdges = GetEdges(target.Vertices);
+                var blockingEdges = GetEdges(blocking.Vertices);
+
+                // Список видимых точек
+                var visiblePoints = new List<Point>(target.Vertices);
+
+                // Проверяем пересечение каждого ребра
+                foreach (var edge in targetEdges)
+                {
+                    foreach (var blockEdge in blockingEdges)
+                    {
+                        if (FindIntersection(edge, blockEdge, out var intersection))
+                        {
+                            if (!visiblePoints.Contains(intersection))
+                                visiblePoints.Add(intersection);
+                        }
+                    }
+                }
+
+                // Фильтруем точки внутри блокирующего треугольника
+                visiblePoints = visiblePoints.Where(p => !IsPointInsideTriangle(p, blocking.Vertices)).ToList();
+
+                // Если есть хотя бы три точки, создаем фрагмент
+                if (visiblePoints.Count >= 3)
+                {
+                    for (int i = 1; i < visiblePoints.Count - 1; i++)
+                    {
+                        var triangle = new Triangle(visiblePoints[0], visiblePoints[i], visiblePoints[i + 1], target.FillColor, target.BorderColor);
+                        visibleFragments.Add(triangle);
+                    }
+                }
+
+                return visibleFragments;
+            }
+
+            public void Rasterize(WriteableBitmap bitmap, bool modeB,Rect clipRect)
             {
                 foreach (var fragment in VisibleFragments)
                 {
-                 (fragment as Triangle)?.DrawTriangle(bitmap, FillColor , modeB); 
+                    (fragment as Triangle)?.DrawTriangle(bitmap, FillColor, modeB, clipRect);
                 }
             }
 
 
-            private void DrawTriangle(WriteableBitmap bitmap, Color color,bool modeB)
+            private void DrawTriangle(WriteableBitmap bitmap, Color color, bool modeB,Rect clipRect)
             {
                 if (modeB)
                 {
                     var (success, newCoordinates) = LiangBarsky.ClipLine(
                         Vertices[0].X, Vertices[0].Y, Vertices[1].X, Vertices[1].Y,
-                        xmin: 0, ymin: 0, xmax: bitmap.Width - 1, ymax: bitmap.Height - 1
+                        xmin: 0, ymin: 0, xmax: 300, ymax: 300
                         );
+                    Console.WriteLine(clipRect.ToString());
+
                     Console.WriteLine(new Point(newCoordinates.newX0, newCoordinates.newY0).ToString());
                     Console.WriteLine(new Point(newCoordinates.newX1, newCoordinates.newY1).ToString());
-
-                    DrawLine(new Point(newCoordinates.newX0, newCoordinates.newY0), new Point(newCoordinates.newX1, newCoordinates.newY1), bitmap, color);
-
+                    if (success)
+                    {
+                        DrawLine(new Point(newCoordinates.newX0, newCoordinates.newY0), new Point(newCoordinates.newX1, newCoordinates.newY1), bitmap, color);
+                    }
 
                     (success, newCoordinates) = LiangBarsky.ClipLine(
                         Vertices[1].X, Vertices[1].Y, Vertices[2].X, Vertices[2].Y,
-                        xmin: 0, ymin: 0, xmax: bitmap.Width - 1, ymax: bitmap.Height - 1
+                        xmin: 0, ymin: 0, xmax: 300, ymax: 300 
                         );
-                    DrawLine(new Point(newCoordinates.newX0, newCoordinates.newY0), new Point(newCoordinates.newX1, newCoordinates.newY1), bitmap, color);
-
+                    if (success)
+                    {
+                        DrawLine(new Point(newCoordinates.newX0, newCoordinates.newY0), new Point(newCoordinates.newX1, newCoordinates.newY1), bitmap, color);
+                    }
 
                     (success, newCoordinates) = LiangBarsky.ClipLine(
                         Vertices[2].X, Vertices[2].Y, Vertices[0].X, Vertices[0].Y,
-                        xmin: 0, ymin: 0, xmax: bitmap.Width - 1, ymax: bitmap.Height - 1
+                        xmin: 0, ymin: 0, xmax: 300, ymax: 300
                         );
-                    DrawLine(new Point(newCoordinates.newX0, newCoordinates.newY0), new Point(newCoordinates.newX1, newCoordinates.newY1), bitmap, color);
+                    if (success)
+                    {
+                        DrawLine(new Point(newCoordinates.newX0, newCoordinates.newY0), new Point(newCoordinates.newX1, newCoordinates.newY1), bitmap, color);
+                    }
                     FillTriangle(bitmap, color);
                 }
                 else
                 {
-                    DrawLine(Vertices[0], Vertices[1],bitmap, Colors.Red);
-                    DrawLine(Vertices[1], Vertices[2],bitmap, Colors.Red);
-                    DrawLine(Vertices[2], Vertices[0],bitmap, Colors.Red);
+                    DrawLine(Vertices[0], Vertices[1], bitmap, Colors.Red);
+                    DrawLine(Vertices[1], Vertices[2], bitmap, Colors.Red);
+                    DrawLine(Vertices[2], Vertices[0], bitmap, Colors.Red);
                 }
-               
+
             }
 
 
             private void DrawLine(Point start, Point end, WriteableBitmap bitmap, Color color)
             {
                 // Округляем координаты до ближайших целых чисел
-                int x0 = (int)Math.Round(start.X);
-                int y0 = (int)Math.Round(start.Y);
-                int x1 = (int)Math.Round(end.X);
-                int y1 = (int)Math.Round(end.Y);
+                int x0 = (int)Math.Floor(start.X);
+                int y0 = (int)Math.Floor(start.Y);
+                int x1 = (int)Math.Floor(end.X);
+                int y1 = (int)Math.Floor(end.Y);
 
+                // Вычисляем разницу по координатам
                 int dx = Math.Abs(x1 - x0);
                 int dy = Math.Abs(y1 - y0);
+
+                // Определяем направление приращения
                 int sx = x0 < x1 ? 1 : -1;
                 int sy = y0 < y1 ? 1 : -1;
+
+                // Ошибка для начального шага
                 int err = dx - dy;
 
-                int maxSteps = Math.Max(dx, dy) + 1; // Ограничение на количество шагов
-
-                while (maxSteps-- > 0) // Защита от бесконечного цикла
+                // Обрабатываем вертикальную или горизонтальную линию
+                if (dx == 0)  // Вертикальная линия
                 {
-                    SetPixel(bitmap, x0, y0, color);
-
-                    if (x0 == x1 && y0 == y1)
-                        break;
-
-                    int e2 = 2 * err;
-                    if (e2 > -dy)
+                    while (y0 != y1)
                     {
-                        err -= dy;
-                        x0 += sx;
-                    }
-                    if (e2 < dx)
-                    {
-                        err += dx;
+                        SetPixel(bitmap, x0, y0, color);
                         y0 += sy;
                     }
                 }
+                else if (dy == 0)  // Горизонтальная линия
+                {
+                    while (x0 != x1)
+                    {
+                        SetPixel(bitmap, x0, y0, color);
+                        x0 += sx;
+                    }
+                }
+                else
+                {
+                    // Основной цикл Брезенхема для остальных случаев
+                    while (true)
+                    {
+                        // Рисуем текущий пиксель
+                        SetPixel(bitmap, x0, y0, color);
+
+                        // Если достигли конца линии, прерываем
+                        if (x0 == x1 && y0 == y1)
+                            break;
+
+                        // Вычисляем удвоенную ошибку
+                        int e2 = 2 * err;
+
+                        // Корректируем ошибку и координаты по X
+                        if (e2 > -dy)
+                        {
+                            err -= dy;
+                            x0 += sx;
+                        }
+
+                        // Корректируем ошибку и координаты по Y
+                        if (e2 < dx)
+                        {
+                            err += dx;
+                            y0 += sy;
+                        }
+                    }
+                }
             }
+
 
             private void SetPixel(WriteableBitmap bitmap, int x, int y, Color color)
             {
@@ -205,7 +327,7 @@ namespace Lab4Variant1
                         0
                     );
                 }
-                    
+
             }
             private void CheckIntersection(Point p1, Point p2, int y, List<int> intersections)
             {
@@ -217,6 +339,8 @@ namespace Lab4Variant1
                     intersections.Add(x);
                 }
             }
+            public Rect clipRect = new Rect(0, 0, 600, 600);
+
             private void FillTriangle(WriteableBitmap bitmap, Color color)
             {
                 // Вычисляем минимальные и максимальные значения Y для треугольника
@@ -225,7 +349,7 @@ namespace Lab4Variant1
 
                 // Ограничиваем минимум и максимум по Y в пределах изображения
                 minY = Math.Max(minY, 0);
-                maxY = Math.Min(maxY, bitmap.PixelHeight - 1);
+                maxY = Math.Min(maxY, (int)clipRect.Height);
 
                 // Проходим по каждой горизонтальной линии (scanline)
                 for (int y = minY; y <= maxY; y++)
@@ -250,7 +374,7 @@ namespace Lab4Variant1
                         for (int x = xStart; x <= xEnd; x++)
                         {
                             // Проверяем, что пиксель в пределах изображения
-                            if (x >= 0 && x < bitmap.PixelWidth)
+                            if (x >= 0 && x < (int)clipRect.Width)
                             {
                                 SetPixel(bitmap, x, y, color);
                             }
@@ -258,22 +382,9 @@ namespace Lab4Variant1
                     }
                 }
             }
-           
 
-            private bool PointInTriangle(Point pt)
-            {
-                double areaOrig = Area(Vertices[0], Vertices[1], Vertices[2]);
-                double area1 = Area(pt, Vertices[1], Vertices[2]);
-                double area2 = Area(Vertices[0], pt, Vertices[2]);
-                double area3 = Area(Vertices[0], Vertices[1], pt);
 
-                return (areaOrig == area1 + area2 + area3);
-            }
-
-            private double Area(Point p1, Point p2, Point p3)
-            {
-                return Math.Abs((p1.X * (p2.Y - p3.Y) + p2.X * (p3.Y - p1.Y) + p3.X * (p1.Y - p2.Y)) / 2.0);
-            }
+            
 
             private Point[] SutherlandHodgmanClip(Point[] vertices, Rect clipRect)
             {
@@ -338,7 +449,6 @@ namespace Lab4Variant1
         {
             public void UpdateLayersWithVisibility(WriteableBitmap bitmap, bool modeB)
             {
-                Rect clipRect = new Rect(30, 30, bitmap.PixelWidth - 400, bitmap.PixelHeight - 400);
 
                 foreach (var layer in Layers)
                 {
@@ -351,22 +461,23 @@ namespace Lab4Variant1
                 }
             }
 
-            public void RasterizeAllLayers(WriteableBitmap bitmap, bool modeB)
+            public void RasterizeAllLayers(WriteableBitmap bitmap, bool modeB,Rect clipRect)
             {
                 foreach (var layer in Layers)
                 {
                     if (layer.IsVisible)
                     {
-                        layer.Shape.Rasterize(bitmap, modeB);
+                        layer.Shape.Rasterize(bitmap, modeB, clipRect);
                     }
                 }
             }
 
             public List<Layer> Layers { get; private set; } = new List<Layer>();
-            
+
             public void AddLayer(Layer layer)
             {
                 Layers.Add(layer);
+                
             }
             //public void Shift(Layer layer)
             //{
@@ -379,21 +490,22 @@ namespace Lab4Variant1
             //        }
             //    }
             //}
+            public Rect clipRect = new Rect(0, 0, 600, 600);
+
             public async void UpdateLayersWithClipping(WriteableBitmap bitmap, bool _modeB)
             {
-                Rect clipRect = new Rect(0, 0, bitmap.PixelWidth - 1, bitmap.PixelHeight - 1);
 
                 foreach (var layer in Layers)
                 {
                     if (layer.IsVisible && layer.Shape is Triangle triangle)
                     {
-                        layer.Shape.Rasterize(bitmap, _modeB);
+                        layer.Shape.Rasterize(bitmap, _modeB, clipRect);
                         await Task.Delay(1000);
                     }
                 }
             }
 
-            
+
             public List<IShape> GetBlockingShapes(int layerId)
             {
                 return Layers.Where(l => l.Id < layerId && l.IsVisible).Select(l => l.Shape).ToList();
@@ -420,7 +532,7 @@ namespace Lab4Variant1
             // Применяем новый масштаб
             ApplyTransform(DrawingCanvas);
         }
-       
+
         private void SetPixel(WriteableBitmap bitmap, int x, int y, Color color)
         {
             if (x >= 0 && y >= 0 && x < bitmap.PixelWidth && y < bitmap.PixelHeight)
@@ -443,10 +555,29 @@ namespace Lab4Variant1
         {
             var triangle = new Triangle(
                 new Point(90, 50),
-                new Point(100, 50),
-                new Point(100, 150),
+                new Point(100, 440),
+                new Point(400, 150),
                 Colors.Blue, Colors.Black);
-            
+
+            var triangle2 = new Triangle(
+               new Point(90, 50),
+               new Point(90, 340),
+               new Point(300, 100),
+               Colors.Red, Colors.Black);
+
+
+            _layerContainer.AddLayer(new Layer(_layerContainer.Layers.Count, $"Layer {_layerContainer.Layers.Count}", triangle2));
+            _layerContainer.AddLayer(new Layer(_layerContainer.Layers.Count, $"Layer {_layerContainer.Layers.Count}", triangle));
+        }
+
+        private void AddLayerButton2_Click(object sender, RoutedEventArgs e)
+        {
+            var triangle = new Triangle(
+                new Point(90, 50),
+                new Point(100, 50),
+                new Point(400, 150),
+                Colors.Blue, Colors.Black);
+
             var triangle2 = new Triangle(
                 new Point(100, 50),
                 new Point(150, 50),
@@ -463,13 +594,13 @@ namespace Lab4Variant1
             var triangle4 = new Triangle(
              new Point(-40, 20),
              new Point(-40, 400),
-             new Point(800, 300),
+             new Point(100, 300),
              Colors.Violet, Colors.Black);
 
             var triangle5 = new Triangle(
             new Point(200, 200),
-            new Point(100, 500),
-            new Point(800, 800),
+            new Point(100, 300),
+            new Point(400, 400),
             Colors.Pink, Colors.Black);
 
             _layerContainer.AddLayer(new Layer(_layerContainer.Layers.Count, $"Layer {_layerContainer.Layers.Count}", triangle));
@@ -477,9 +608,8 @@ namespace Lab4Variant1
             _layerContainer.AddLayer(new Layer(_layerContainer.Layers.Count, $"Layer {_layerContainer.Layers.Count}", triangle3));
             _layerContainer.AddLayer(new Layer(_layerContainer.Layers.Count, $"Layer {_layerContainer.Layers.Count}", triangle4));
             _layerContainer.AddLayer(new Layer(_layerContainer.Layers.Count, $"Layer {_layerContainer.Layers.Count}", triangle5));
-
-
         }
+
         private void DrawLine(WriteableBitmap bitmap, int x1, int y1, int x2, int y2, Color color)
         {
             int dx = Math.Abs(x2 - x1);
@@ -521,7 +651,7 @@ namespace Lab4Variant1
             // Рисуем правую вертикальную линию
             DrawLine(bitmap, x2, y1, x2, y2, color);
         }
-        private void DrawGrid(WriteableBitmap bitmap, int gridSize = 10, Color gridColor = default)
+        private void DrawGrid(WriteableBitmap bitmap, int gridSize, Color gridColor = default)
         {
             // Если цвет не задан, используем стандартный
             if (gridColor == default)
@@ -530,24 +660,24 @@ namespace Lab4Variant1
             }
 
             // Рисуем вертикальные линии
-            for (int x = 0; x < bitmap.PixelWidth; x += gridSize)
+            for (int x = 0; x < (int)clipRect.Width - 1; x += gridSize)
             {
-                DrawLine(bitmap, x, 0, x, bitmap.PixelHeight - 1, gridColor);
+                DrawLine(bitmap, x, 0, x, (int)clipRect.Width - 1, gridColor);
             }
 
             // Рисуем горизонтальные линии
-            for (int y = 0; y < bitmap.PixelHeight; y += gridSize)
+            for (int y = 0; y < (int)clipRect.Height; y += gridSize)
             {
-                DrawLine(bitmap, 0, y, bitmap.PixelWidth - 1, y, gridColor);
+                DrawLine(bitmap, 0, y, (int)clipRect.Height - 1, y, gridColor);
             }
         }
 
         private void DrawAxesAndFrame(WriteableBitmap bitmap)
         {
             // Рисуем рамку (границу) изображения
-            DrawRectangle(bitmap, 0, 0, bitmap.PixelWidth - 1, bitmap.PixelHeight - 1, Colors.Black);
+            DrawRectangle(bitmap, 0, 0, (int)clipRect.Width, (int)clipRect.Height, Colors.Black);
         }
-       
+
 
         private void ScaleUpButton_Click(object sender, RoutedEventArgs e)
         {
@@ -595,7 +725,7 @@ namespace Lab4Variant1
                 Children = new TransformCollection
             {
                 new ScaleTransform(_scale, _scale),
-                
+
             }
             };
         }
@@ -613,21 +743,21 @@ namespace Lab4Variant1
             bitmap.AddDirtyRect(new Int32Rect(0, 0, bitmap.PixelWidth, bitmap.PixelHeight));
             bitmap.Unlock();
         }
-        private  void RenderButton_Click(object sender, RoutedEventArgs e)
+        private void RenderButton_Click(object sender, RoutedEventArgs e)
         {
-            var _virtualBitmap = new WriteableBitmap((int)DrawingCanvas.Width , (int)DrawingCanvas.Height , 2, 2, PixelFormats.Pbgra32, null);
+            var _virtualBitmap = new WriteableBitmap((int)DrawingCanvas.Width, (int)DrawingCanvas.Height, 2, 2, PixelFormats.Pbgra32, null);
             ClearBitmap(_virtualBitmap, Colors.White);
 
             // Обновляем слои с отсечением
             _layerContainer.UpdateLayersWithVisibility(_virtualBitmap, _modeB);
-            _layerContainer.RasterizeAllLayers(_virtualBitmap, _modeB);
+            _layerContainer.RasterizeAllLayers(_virtualBitmap, _modeB, clipRect);
             DrawAxesAndFrame(_virtualBitmap);
             DrawGrid(_virtualBitmap, gridSize: 2, gridColor: Colors.LightGray);
             DrawingCanvas.Background = new ImageBrush(_virtualBitmap);
         }
         private async void RenderSequentiallyButton_Click(object sender, RoutedEventArgs e)
         {
-            var bitmap = new WriteableBitmap((int)DrawingCanvas.Width , (int)DrawingCanvas.Height , 2, 2, PixelFormats.Pbgra32, null);
+            var bitmap = new WriteableBitmap((int)DrawingCanvas.Width, (int)DrawingCanvas.Height, 2, 2, PixelFormats.Pbgra32, null);
             DrawAxesAndFrame(bitmap);
             // Обновляем слои с отсечением
             _layerContainer.UpdateLayersWithClipping(bitmap, _modeB);
@@ -636,7 +766,7 @@ namespace Lab4Variant1
                 if (layer.IsVisible && layer.Shape is Triangle triangle)
                 {
                     var visiblePart = layer.Shape.DetermineVisiblePart(_layerContainer.GetBlockingShapes(layer.Id));
-                    visiblePart.Rasterize(bitmap,_modeB);
+                    visiblePart.Rasterize(bitmap, _modeB, clipRect );
                     DrawingCanvas.Background = new ImageBrush(bitmap);
                     await Task.Delay(1000);
                 }
@@ -644,11 +774,64 @@ namespace Lab4Variant1
             DrawGrid(bitmap, gridSize: 2, gridColor: Colors.LightGray);
 
         }
+        public Rect clipRect = new Rect(0, 0, 600, 600);
 
         private void ShowGridButton_Click(object sender, RoutedEventArgs e)
         {
-           
 
+
+        }
+
+        private void DrawOnlyNeededButton_Click(object sender, RoutedEventArgs e)
+        {
+            var _virtualBitmap = new WriteableBitmap((int)DrawingCanvas.Width, (int)DrawingCanvas.Height, 2, 2, PixelFormats.Pbgra32, null);
+            ClearBitmap(_virtualBitmap, Colors.White);
+            _layerContainer.UpdateLayersWithVisibility(_virtualBitmap, _modeB);
+            _layerContainer.RasterizeAllLayers(_virtualBitmap, _modeB, clipRect);
+            DrawAxesAndFrame(_virtualBitmap);
+            DrawGrid(_virtualBitmap, gridSize: 2, gridColor: Colors.LightGray);
+            DrawingCanvas.Background = new ImageBrush(_virtualBitmap);
+
+        }
+
+        private void AddLayerButtonButton2_Click(object sender, RoutedEventArgs e)
+        {
+            var triangle = new Triangle(
+                new Point(90, 50),
+                new Point(100, 50),
+                new Point(100, 150),
+                Colors.Blue, Colors.Black);
+
+            var triangle2 = new Triangle(
+                new Point(100, 50),
+                new Point(150, 50),
+                new Point(200, 150),
+                Colors.Red, Colors.Black
+                );
+
+            var triangle3 = new Triangle(
+              new Point(-300, 50),
+              new Point(100, 250),
+              new Point(300, 150),
+              Colors.Yellow, Colors.Black);
+
+            var triangle4 = new Triangle(
+             new Point(-40, 20),
+             new Point(-40, 400),
+             new Point(800, 300),
+             Colors.Violet, Colors.Black);
+
+            var triangle5 = new Triangle(
+            new Point(200, 200),
+            new Point(100, 500),
+            new Point(300, 400),
+            Colors.Pink, Colors.Black);
+
+            _layerContainer.AddLayer(new Layer(_layerContainer.Layers.Count, $"Layer {_layerContainer.Layers.Count}", triangle));
+            _layerContainer.AddLayer(new Layer(_layerContainer.Layers.Count, $"Layer {_layerContainer.Layers.Count}", triangle2));
+            _layerContainer.AddLayer(new Layer(_layerContainer.Layers.Count, $"Layer {_layerContainer.Layers.Count}", triangle3));
+            _layerContainer.AddLayer(new Layer(_layerContainer.Layers.Count, $"Layer {_layerContainer.Layers.Count}", triangle4));
+            _layerContainer.AddLayer(new Layer(_layerContainer.Layers.Count, $"Layer {_layerContainer.Layers.Count}", triangle5));
         }
     }
 
